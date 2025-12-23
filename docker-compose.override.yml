@@ -31,9 +31,13 @@ services:
       /bin/sh -c "
       mc alias set myminio http://minio:9000 minioadmin minioadmin;
       mc mb myminio/airflow-artifacts || true;
+      mc mb myminio/mlflow-artifacts || true;
       mc anonymous set public myminio/mlflow-artifacts;
       exit 0;
       "
+    networks:
+      - airflow
+      - default
 
   mlflow:
     image: python:3.11-slim
