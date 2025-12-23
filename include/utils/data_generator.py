@@ -219,7 +219,30 @@ class RealisticSalesDataGenerator:
         return pd.DataFrame(events)               
                                 
     def generate_sales_data(self, output_dir: str = 'tmp/sales_data/') -> Dict[str, List[str]]:
+        # Clean up any existing data to avoid corrupted files from previous runs
+        import shutil
+        if os.path.exists(output_dir):
+            logger.info(f"Cleaning up existing data directory: {output_dir}")
+            try:
+                shutil.rmtree(output_dir)
+            except OSError as e:
+                # If rmtree fails (locked files, permissions), try removing with ignore_errors
+                logger.warning(f"Initial rmtree failed: {e}, retrying with ignore_errors")
+                shutil.rmtree(output_dir, ignore_errors=True)
+                # Also try a few seconds delay in case files are still being released
+                import time
+                time.sleep(2)
+                # Create fresh to ensure clean state
+                if os.path.exists(output_dir):
+                    shutil.rmtree(output_dir, ignore_errors=True)
+        
         os.makedirs(output_dir, exist_ok=True)
+        
+        def safe_write_parquet(df: pd.DataFrame, path: str):
+            """Write parquet atomically to reduce risk of partial/corrupted files."""
+            tmp_path = path + ".tmp"
+            df.to_parquet(tmp_path, index=False)
+            os.replace(tmp_path, path)
         
         #generate supplementary data 
         promotions_df = self.generate_promotions()
@@ -236,12 +259,12 @@ class RealisticSalesDataGenerator:
         #supplementary data 
         promotions_path = os.path.join(output_dir, "promotions/promotions.parquet")
         os.makedirs(os.path.dirname(promotions_path), exist_ok=True)
-        promotions_df.to_parquet(promotions_path, index=False)
+        safe_write_parquet(promotions_df, promotions_path)
         file_paths['promotions'].append(promotions_path)
         
         events_path = os.path.join(output_dir, "store_events/events.parquet")
         os.makedirs(os.path.dirname(events_path), exist_ok=True)
-        store_events_df.to_parquet(events_path, index=False)
+        safe_write_parquet(store_events_df, events_path)
         file_paths['store_events'].append(events_path)
         
         #generate sales data by day
@@ -356,7 +379,7 @@ class RealisticSalesDataGenerator:
                 sales_path = os.path.join(output_dir, f"sales/year={current_date.year}/month={current_date.month:02d}/day={current_date.day:02d}"
                                                   f"/sales_{date_str}.parquet")
                 os.makedirs(os.path.dirname(sales_path), exist_ok=True)
-                sales_df.to_parquet(sales_path, index=False)
+                safe_write_parquet(sales_df, sales_path)
                 file_paths['sales'].append(sales_path)
                 
             #customer traffic data
@@ -365,7 +388,7 @@ class RealisticSalesDataGenerator:
                 traffic_path = os.path.join(output_dir, f"customer_traffic/year={current_date.year}/month={current_date.month:02d}/day={current_date.day:02d}/"
                                                         f"sales_{date_str}.parquet")
                 os.makedirs(os.path.dirname(traffic_path), exist_ok=True)
-                traffic_df.to_parquet(traffic_path, index=False)
+                safe_write_parquet(traffic_df, traffic_path)
                 file_paths['customer_traffic'].append(traffic_path)
                 
             #inventory data
@@ -375,7 +398,7 @@ class RealisticSalesDataGenerator:
                                               f"inventory/year={current_date.year}/month={current_date.month:02d}/day={current_date.day:02d}/"
                                               f"inventory_{date_str}.parquet")
                 os.makedirs(os.path.dirname(inventory_path), exist_ok=True)
-                inventory_df.to_parquet(inventory_path, index=False)
+                safe_write_parquet(inventory_df, inventory_path)
                 file_paths['inventory'].append(inventory_path)
                 
             #move to the next day

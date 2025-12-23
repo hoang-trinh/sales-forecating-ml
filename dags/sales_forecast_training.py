@@ -36,7 +36,7 @@ def sales_forecast_training():
     @task()
     def extract_data_task():
         from include.utils.data_generator import RealisticSalesDataGenerator
-        data_output_dir = 'tmp/sales_data/'
+        data_output_dir = '/tmp/sales_data/'
         
         generator = RealisticSalesDataGenerator(
             start_date="2021-01-01",
@@ -60,7 +60,11 @@ def sales_forecast_training():
         issues_found = []
         print(f"Validating {len(file_paths['sales'])} sales files...")
         for i, sales_file in enumerate(file_paths["sales"][:10]):
-            df = pd.read_parquet(sales_file)
+            try:
+                df = pd.read_parquet(sales_file)
+            except Exception as e:
+                issues_found.append(f"Corrupted file {sales_file}: {str(e)}")
+                continue
             if i == 0:
                 print(f"Sales data columns: {df.columns.tolist()}")
             if df.empty:
@@ -84,9 +88,12 @@ def sales_forecast_training():
         for data_type in ["promotions", "store_events", "customer_traffic"]:
             if data_type in file_paths and file_paths[data_type]:
                 sample_file = file_paths[data_type][0]
-                df = pd.read_parquet(sample_file)
-                print(f"{data_type} data shape: {df.shape}")
-                print(f"{data_type} columns: {df.columns.tolist()}")
+                try:
+                    df = pd.read_parquet(sample_file)
+                    print(f"{data_type} data shape: {df.shape}")
+                    print(f"{data_type} columns: {df.columns.tolist()}")
+                except Exception as e:
+                    issues_found.append(f"Corrupted {data_type} file: {str(e)}")
         validation_summary = {
             "total_files_validated": len(file_paths["sales"][:10]),
             "total_rows": total_rows,
@@ -108,12 +115,22 @@ def sales_forecast_training():
         file_paths = extract_result["file_paths"]
         print("Loading sales data from multiple files...")
         sales_dfs = []
+        bad_sales_files = []
         max_files = 50
         for i, sales_file in enumerate(file_paths["sales"][:max_files]):
-            df = pd.read_parquet(sales_file)
-            sales_dfs.append(df)
+            try:
+                df = pd.read_parquet(sales_file)
+                sales_dfs.append(df)
+            except Exception as e:
+                bad_sales_files.append(f"{sales_file}: {e}")
             if (i + 1) % 10 == 0:
                 print(f"  Loaded {i + 1} files...")
+        if bad_sales_files:
+            print("Skipping corrupted sales files:")
+            for item in bad_sales_files[:5]:
+                print(f"  - {item}")
+        if not sales_dfs:
+            raise RuntimeError("No valid sales parquet files to train on (all reads failed)")
         sales_df = pd.concat(sales_dfs, ignore_index=True)
         print(f"Combined sales data shape: {sales_df.shape}")
         daily_sales = (
